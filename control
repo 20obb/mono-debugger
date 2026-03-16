@@ -1,0 +1,9 @@
+Package: com.devil.miniprocmon
+Name: MiniFileMon
+Version: 0.1.0
+Architecture: iphoneos-arm64
+Description: Simple iOS 16 file activity HUD for jailbroken devices.
+Maintainer: devil
+Author: devil
+Section: Utilities
+Depends: firmware (>= 16.0), ellekit | mobilesubstrate
