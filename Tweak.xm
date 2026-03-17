@@ -53,9 +53,10 @@ static const unsigned long kMPMVnodeMask = DISPATCH_VNODE_WRITE |
 @interface MPMOverlayController ()
 @property (nonatomic, strong) MPMPassThroughWindow *window;
 @property (nonatomic, strong) UIView *hudView;
+@property (nonatomic, strong) UIView *hudHeaderView;
 @property (nonatomic, strong) UILabel *hudTitleLabel;
 @property (nonatomic, strong) UILabel *hudStatusLabel;
-@property (nonatomic, strong) UILabel *hudBodyLabel;
+@property (nonatomic, strong) UITextView *hudBodyTextView;
 @property (nonatomic, strong) UIView *panelView;
 @property (nonatomic, strong) UITextView *textView;
 @property (nonatomic, strong) UIButton *launcherButton;
@@ -72,6 +73,8 @@ static const unsigned long kMPMVnodeMask = DISPATCH_VNODE_WRITE |
 @property (nonatomic, assign) BOOL panelVisible;
 @property (nonatomic, assign) BOOL refreshScheduled;
 @property (nonatomic, assign) BOOL hasLoadedInitialSnapshot;
+@property (nonatomic, assign) BOOL hudExpanded;
+@property (nonatomic, assign) BOOL launcherHidden;
 @end
 
 @implementation MPMPassThroughWindow
@@ -561,6 +564,7 @@ static NSArray<NSString *> *MPMBuildEventDiff(NSDictionary<NSString *, MPMFileSt
         _watchNodes = [NSMutableDictionary dictionary];
         _liveSnapshot = [NSMutableDictionary dictionary];
         _monitorQueue = dispatch_queue_create("com.devil.miniprocmon.filemonitor", DISPATCH_QUEUE_SERIAL);
+        _launcherHidden = YES;
     }
     return self;
 }
@@ -603,7 +607,7 @@ static NSArray<NSString *> *MPMBuildEventDiff(NSDictionary<NSString *, MPMFileSt
 - (void)buildHUD {
     CGRect bounds = UIScreen.mainScreen.bounds;
     CGFloat width = MIN(CGRectGetWidth(bounds) - 24.0, 344.0);
-    self.hudView = [[UIView alloc] initWithFrame:CGRectMake((CGRectGetWidth(bounds) - width) / 2.0, 54.0, width, 98.0)];
+    self.hudView = [[UIView alloc] initWithFrame:CGRectMake((CGRectGetWidth(bounds) - width) / 2.0, 54.0, width, 110.0)];
     self.hudView.backgroundColor = [UIColor colorWithRed:0.05 green:0.07 blue:0.10 alpha:0.84];
     self.hudView.layer.cornerRadius = 18.0;
     self.hudView.layer.borderWidth = 1.0;
@@ -612,8 +616,7 @@ static NSArray<NSString *> *MPMBuildEventDiff(NSDictionary<NSString *, MPMFileSt
     self.hudView.layer.shadowOpacity = 0.18;
     self.hudView.layer.shadowRadius = 12.0;
     self.hudView.layer.shadowOffset = CGSizeMake(0.0, 6.0);
-    self.hudView.userInteractionEnabled = NO;
-    self.hudView.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleBottomMargin;
+    self.hudView.userInteractionEnabled = YES;
 
     UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterialDark];
     UIVisualEffectView *blurView = [[UIVisualEffectView alloc] initWithEffect:blur];
@@ -623,26 +626,115 @@ static NSArray<NSString *> *MPMBuildEventDiff(NSDictionary<NSString *, MPMFileSt
     blurView.clipsToBounds = YES;
     [self.hudView addSubview:blurView];
 
-    self.hudTitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, 10.0, width - 28.0, 20.0)];
+    self.hudHeaderView = [[UIView alloc] initWithFrame:CGRectZero];
+    self.hudHeaderView.backgroundColor = UIColor.clearColor;
+    [self.hudView addSubview:self.hudHeaderView];
+
+    self.hudTitleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.hudTitleLabel.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightSemibold];
     self.hudTitleLabel.textColor = UIColor.whiteColor;
     self.hudTitleLabel.text = @"MiniFileMon";
-    [self.hudView addSubview:self.hudTitleLabel];
+    [self.hudHeaderView addSubview:self.hudTitleLabel];
 
-    self.hudStatusLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, 28.0, width - 28.0, 16.0)];
+    self.hudStatusLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.hudStatusLabel.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightMedium];
     self.hudStatusLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.68];
     self.hudStatusLabel.text = @"Preparing vnode monitor...";
-    [self.hudView addSubview:self.hudStatusLabel];
+    [self.hudHeaderView addSubview:self.hudStatusLabel];
 
-    self.hudBodyLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, 48.0, width - 28.0, 40.0)];
-    self.hudBodyLabel.font = [UIFont monospacedSystemFontOfSize:11.5 weight:UIFontWeightMedium];
-    self.hudBodyLabel.textColor = [UIColor colorWithRed:0.65 green:0.95 blue:0.79 alpha:1.0];
-    self.hudBodyLabel.numberOfLines = 3;
-    self.hudBodyLabel.text = @"Waiting for file events...";
-    [self.hudView addSubview:self.hudBodyLabel];
+    self.hudBodyTextView = [[UITextView alloc] initWithFrame:CGRectZero];
+    self.hudBodyTextView.backgroundColor = UIColor.clearColor;
+    self.hudBodyTextView.textColor = [UIColor colorWithRed:0.65 green:0.95 blue:0.79 alpha:1.0];
+    self.hudBodyTextView.font = [UIFont monospacedSystemFontOfSize:11.5 weight:UIFontWeightMedium];
+    self.hudBodyTextView.textContainerInset = UIEdgeInsetsZero;
+    self.hudBodyTextView.textContainer.lineFragmentPadding = 0.0;
+    self.hudBodyTextView.editable = NO;
+    self.hudBodyTextView.selectable = NO;
+    self.hudBodyTextView.scrollEnabled = NO;
+    self.hudBodyTextView.alwaysBounceVertical = NO;
+    self.hudBodyTextView.showsVerticalScrollIndicator = NO;
+    self.hudBodyTextView.text = @"Waiting for file events...";
+    [self.hudView addSubview:self.hudBodyTextView];
+
+    UIPanGestureRecognizer *hudPanGesture = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleHUDPan:)];
+    [self.hudHeaderView addGestureRecognizer:hudPanGesture];
+
+    UILongPressGestureRecognizer *hudLongPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleHUDLongPress:)];
+    hudLongPress.minimumPressDuration = 0.45;
+    [self.hudHeaderView addGestureRecognizer:hudLongPress];
+
+    UITapGestureRecognizer *hudDoubleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(togglePanel)];
+    hudDoubleTap.numberOfTapsRequired = 2;
+    [self.hudHeaderView addGestureRecognizer:hudDoubleTap];
 
     [self.window.rootViewController.view addSubview:self.hudView];
+    [self refreshHUDLayoutAnimated:NO];
+}
+
+- (CGSize)hudSizeForExpandedState:(BOOL)expanded {
+    CGRect bounds = self.window.rootViewController.view.bounds;
+    CGFloat width = MIN(CGRectGetWidth(bounds) - 24.0, expanded ? 372.0 : 344.0);
+    CGFloat height = expanded ? MIN(CGRectGetHeight(bounds) * 0.48, 330.0) : 110.0;
+    return CGSizeMake(width, height);
+}
+
+- (void)refreshHUDLayoutAnimated:(BOOL)animated {
+    if (self.hudView == nil) {
+        return;
+    }
+
+    CGRect bounds = self.window.rootViewController.view.bounds;
+    UIEdgeInsets safeInsets = UIEdgeInsetsZero;
+    if (@available(iOS 11.0, *)) {
+        safeInsets = self.window.safeAreaInsets;
+    }
+
+    CGSize targetSize = [self hudSizeForExpandedState:self.hudExpanded];
+    CGPoint center = self.hudView.superview != nil ? self.hudView.center : CGPointMake(CGRectGetMidX(bounds), safeInsets.top + 54.0);
+    CGFloat sideInset = 12.0;
+    CGFloat topInset = MAX(18.0, safeInsets.top + 8.0);
+    CGFloat bottomInset = MAX(18.0, safeInsets.bottom + 8.0);
+    CGFloat minCenterX = sideInset + targetSize.width / 2.0;
+    CGFloat maxCenterX = CGRectGetWidth(bounds) - sideInset - targetSize.width / 2.0;
+    CGFloat minCenterY = topInset + targetSize.height / 2.0;
+    CGFloat maxCenterY = CGRectGetHeight(bounds) - bottomInset - targetSize.height / 2.0;
+
+    if (maxCenterX < minCenterX) {
+        center.x = CGRectGetMidX(bounds);
+    } else {
+        center.x = MAX(minCenterX, MIN(maxCenterX, center.x));
+    }
+
+    if (maxCenterY < minCenterY) {
+        center.y = CGRectGetMidY(bounds);
+    } else {
+        center.y = MAX(minCenterY, MIN(maxCenterY, center.y));
+    }
+
+    CGRect targetFrame = CGRectMake(center.x - targetSize.width / 2.0,
+                                    center.y - targetSize.height / 2.0,
+                                    targetSize.width,
+                                    targetSize.height);
+
+    void (^applyLayout)(void) = ^{
+        self.hudView.frame = targetFrame;
+        self.hudView.layer.cornerRadius = self.hudExpanded ? 22.0 : 18.0;
+        CGFloat headerHeight = 40.0;
+        self.hudHeaderView.frame = CGRectMake(14.0, 10.0, targetSize.width - 28.0, headerHeight);
+        self.hudTitleLabel.frame = CGRectMake(0.0, 0.0, CGRectGetWidth(self.hudHeaderView.bounds), 20.0);
+        self.hudStatusLabel.frame = CGRectMake(0.0, 20.0, CGRectGetWidth(self.hudHeaderView.bounds), 16.0);
+        CGFloat bodyY = CGRectGetMaxY(self.hudHeaderView.frame) + 6.0;
+        self.hudBodyTextView.frame = CGRectMake(14.0, bodyY, targetSize.width - 28.0, targetSize.height - bodyY - 12.0);
+        self.hudBodyTextView.scrollEnabled = self.hudExpanded;
+        self.hudBodyTextView.showsVerticalScrollIndicator = self.hudExpanded;
+        self.hudBodyTextView.alwaysBounceVertical = self.hudExpanded;
+    };
+
+    if (animated) {
+        [UIView animateWithDuration:0.22 animations:applyLayout];
+    } else {
+        applyLayout();
+    }
 }
 
 - (void)buildLauncherButton {
@@ -666,6 +758,8 @@ static NSArray<NSString *> *MPMBuildEventDiff(NSDictionary<NSString *, MPMFileSt
     [self.launcherButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     self.launcherButton.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleTopMargin;
     [self.launcherButton addTarget:self action:@selector(togglePanel) forControlEvents:UIControlEventTouchUpInside];
+    self.launcherButton.hidden = self.launcherHidden;
+    self.launcherButton.alpha = self.launcherHidden ? 0.0 : 1.0;
 
     UIPanGestureRecognizer *dragGesture = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleButtonDrag:)];
     [self.launcherButton addGestureRecognizer:dragGesture];
@@ -748,7 +842,17 @@ static NSArray<NSString *> *MPMBuildEventDiff(NSDictionary<NSString *, MPMFileSt
 }
 
 - (void)updateTouchableViews {
-    self.window.touchableViews = @[self.launcherButton, self.panelView];
+    NSMutableArray<UIView *> *touchableViews = [NSMutableArray array];
+    if (self.hudView != nil) {
+        [touchableViews addObject:self.hudView];
+    }
+    if (!self.launcherHidden && self.launcherButton != nil) {
+        [touchableViews addObject:self.launcherButton];
+    }
+    if (self.panelView != nil) {
+        [touchableViews addObject:self.panelView];
+    }
+    self.window.touchableViews = touchableViews;
 }
 
 - (void)startMonitoring {
@@ -848,6 +952,40 @@ static NSArray<NSString *> *MPMBuildEventDiff(NSDictionary<NSString *, MPMFileSt
 
     self.launcherButton.center = center;
     [gesture setTranslation:CGPointZero inView:self.window.rootViewController.view];
+}
+
+- (void)handleHUDPan:(UIPanGestureRecognizer *)gesture {
+    CGPoint translation = [gesture translationInView:self.window.rootViewController.view];
+    CGPoint center = self.hudView.center;
+    center.x += translation.x;
+    center.y += translation.y;
+
+    CGRect bounds = self.window.rootViewController.view.bounds;
+    UIEdgeInsets safeInsets = UIEdgeInsetsZero;
+    if (@available(iOS 11.0, *)) {
+        safeInsets = self.window.safeAreaInsets;
+    }
+
+    CGFloat sideInset = 12.0;
+    CGFloat topInset = MAX(18.0, safeInsets.top + 8.0);
+    CGFloat bottomInset = MAX(18.0, safeInsets.bottom + 8.0);
+    CGFloat halfWidth = CGRectGetWidth(self.hudView.bounds) / 2.0;
+    CGFloat halfHeight = CGRectGetHeight(self.hudView.bounds) / 2.0;
+    center.x = MAX(sideInset + halfWidth, MIN(CGRectGetWidth(bounds) - sideInset - halfWidth, center.x));
+    center.y = MAX(topInset + halfHeight, MIN(CGRectGetHeight(bounds) - bottomInset - halfHeight, center.y));
+
+    self.hudView.center = center;
+    [gesture setTranslation:CGPointZero inView:self.window.rootViewController.view];
+}
+
+- (void)handleHUDLongPress:(UILongPressGestureRecognizer *)gesture {
+    if (gesture.state != UIGestureRecognizerStateBegan) {
+        return;
+    }
+
+    self.hudExpanded = !self.hudExpanded;
+    [self refreshHUD];
+    [self refreshHUDLayoutAnimated:YES];
 }
 
 - (void)togglePanel {
@@ -989,6 +1127,33 @@ static NSArray<NSString *> *MPMBuildEventDiff(NSDictionary<NSString *, MPMFileSt
     return lines;
 }
 
+- (NSString *)fullHUDText {
+    NSMutableString *output = [NSMutableString string];
+    [output appendString:@"Long press top bar to resize\n"];
+    [output appendString:@"Drag top bar to move\n"];
+    [output appendString:@"Double tap top bar for panel\n"];
+
+    [output appendString:@"\nRecent events\n-------------\n"];
+    if (self.eventLog.count == 0) {
+        [output appendString:@"(waiting for changes)\n"];
+    } else {
+        for (NSString *eventLine in self.eventLog.reverseObjectEnumerator) {
+            [output appendFormat:@"%@\n", eventLine];
+        }
+    }
+
+    [output appendString:@"\nWatch roots\n-----------\n"];
+    if (self.watchRoots.count == 0) {
+        [output appendString:@"(none found yet)\n"];
+    } else {
+        for (NSString *root in self.watchRoots) {
+            [output appendFormat:@"%@\n", root];
+        }
+    }
+
+    return output;
+}
+
 - (void)refreshHUD {
     NSString *status = [NSString stringWithFormat:@"%lu roots | %lu entries | vnode",
                         (unsigned long)self.watchRoots.count,
@@ -1001,8 +1166,10 @@ static NSArray<NSString *> *MPMBuildEventDiff(NSDictionary<NSString *, MPMFileSt
         status = @"No watch roots found yet";
     }
 
+    self.hudTitleLabel.text = self.hudExpanded ? @"MiniFileMon  [Expanded]" : @"MiniFileMon";
     self.hudStatusLabel.text = status;
-    self.hudBodyLabel.text = [[self latestHUDLines] componentsJoinedByString:@"\n"];
+    self.hudBodyTextView.text = self.hudExpanded ? [self fullHUDText] : [[self latestHUDLines] componentsJoinedByString:@"\n"];
+    self.hudBodyTextView.contentOffset = CGPointZero;
 }
 
 - (void)refreshPanelText {
